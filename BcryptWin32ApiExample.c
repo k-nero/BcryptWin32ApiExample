@@ -1,10 +1,10 @@
 #include <windows.h>
 #include <bcrypt.h>
-#include <iostream>
+#include <stdio.h>
 
 #pragma comment(lib, "bcrypt.lib")
 
-static NTSTATUS EncryptPassword(PUCHAR password, PUCHAR& hash, DWORD& hashSize, PUCHAR secret, DWORD secretSize)
+static NTSTATUS EncryptPassword(PUCHAR password, PUCHAR* hash, DWORD* hashSize, PUCHAR secret, DWORD secretSize)
 {
 	BCRYPT_ALG_HANDLE hAlg = NULL;
 	BCRYPT_HASH_HANDLE hHash = NULL;
@@ -16,55 +16,57 @@ static NTSTATUS EncryptPassword(PUCHAR password, PUCHAR& hash, DWORD& hashSize, 
 	status = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA512_ALGORITHM, NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG);
 	if (!(((NTSTATUS)(status)) >= 0))
 	{
-		std::cerr << "BCryptOpenAlgorithmProvider failed with status: " << std::hex << status << std::endl;
+		printf_s("BCryptOpenAlgorithmProvider failed with status: 0x%x\n", status);
 		goto Cleanup;
 	}
 
 	status = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbHashObject, sizeof(DWORD), &cbData, 0);
 	if (!(((NTSTATUS)(status)) >= 0))
 	{
-		std::cerr << "BCryptGetProperty failed with status: " << std::hex << status << std::endl;
+		printf_s("BCryptGetProperty failed with status: 0x%x\n", status);
 		goto Cleanup;
 	}
 
 	pbHashObject = (PBYTE)HeapAlloc(GetProcessHeap(), 0, cbHashObject);
 	if (NULL == pbHashObject)
 	{
-		std::cerr << "Memory allocation failed" << std::endl;
+		printf_s("HeapAlloc failed\n");
 		goto Cleanup;
 	}
 
 	status = BCryptCreateHash(hAlg, &hHash, pbHashObject, cbHashObject, secret, secretSize, 0);
 	if (!(((NTSTATUS)(status)) >= 0))
 	{
-		std::cerr << "BCryptCreateHash failed with status: " << std::hex << status << std::endl;
+		printf_s("BCryptCreateHash failed with status: 0x%x\n", status);
 		goto Cleanup;
 	}
 
 	status = BCryptHashData(hHash, password, passwordSize, 0);
 	if (!(((NTSTATUS)(status)) >= 0))
 	{
-		std::cerr << "BCryptHashData failed with status: " << std::hex << status << std::endl;
+		printf_s("BCryptHashData failed with status: 0x%x\n", status);
 		goto Cleanup;
 	}
 
-	status = BCryptGetProperty(hHash, BCRYPT_HASH_LENGTH, (PBYTE)&hashSize, sizeof(DWORD), &cbData, 0);
+	status = BCryptGetProperty(hHash, BCRYPT_HASH_LENGTH, (PBYTE)hashSize, sizeof(DWORD), &cbData, 0);
 	if (!(((NTSTATUS)(status)) >= 0))
 	{
-		std::cerr << "BCryptGetProperty failed with status: " << std::hex << status << std::endl;
+		printf_s("BCryptGetProperty failed with status: 0x%x\n", status);
 		goto Cleanup;
 	}
 
-	hash = (PUCHAR)malloc(hashSize);
-	status = BCryptFinishHash(hHash, hash, hashSize, NULL);
+	*hash = (PUCHAR)malloc(*hashSize);
+	status = BCryptFinishHash(hHash, *hash, *hashSize, NULL);
 	if (status == STATUS_INVALID_PARAMETER)
 	{
-		std::cerr << "One or more parameters are not valid. This includes the case where cbOutput is not the same size as the hash. " << std::hex << status << std::endl;
+		printf_s("BCryptFinishHash failed with status: 0x%x\n", status);
+		printf_s("Error code: STATUS_INVALID_PARAMETER\n");
 		goto Cleanup;
 	}
 	else if (status == STATUS_INVALID_HANDLE)
 	{
-		std::cerr << "The hash handle in the hHash parameter is not valid. " << std::hex << status << std::endl;
+		printf_s("BCryptFinishHash failed with status: 0x%x\n", status);
+		printf_s("Error code: STATUS_INVALID_HANDLE\n");
 		goto Cleanup;
 	}
 
@@ -89,28 +91,28 @@ static NTSTATUS ValidatePassword(PUCHAR inputPassword, PUCHAR storedHash, ULONG 
 {
 	PUCHAR inputHash;
 	ULONG inputHashSize;
-	NTSTATUS status = EncryptPassword(inputPassword, inputHash, inputHashSize, secret, secretSize);
+	NTSTATUS status = EncryptPassword(inputPassword, &inputHash, &inputHashSize, secret, secretSize);
 
 	if (!(((NTSTATUS)(status)) >= 0))
 	{
-		std::cerr << "EncryptPassword failed with status: " << std::hex << status << std::endl;
+		printf_s("EncryptPassword failed with status: 0x%x\n", status);
 		return status;
 	}
 
 	if (inputHashSize != hashSize)
 	{
-		std::cerr << "Hash size mismatch" << std::endl;
+		printf_s("Hash size mismatch\n");
 		return STATUS_INVALID_PARAMETER;
 	}
 
 	if (memcmp(inputHash, storedHash, hashSize) == 0)
 	{
-		std::cout << "Password is valid" << std::endl;
+		printf_s("Password is valid\n");
 		return 1;
 	}
 	else
 	{
-		std::cout << "Password is invalid" << std::endl;
+		printf_s("Password is invalid\n");
 		return STATUS_INVALID_PARAMETER;
 	}
 }
@@ -121,23 +123,23 @@ int main()
 	UCHAR password[] = "password";
 	UCHAR secret[] = "top_secret";
 
-	PUCHAR hash = nullptr;
+	PUCHAR hash = NULL;
 
 	NTSTATUS status = 0;
 	DWORD hashSize = 0;
 
-	status = EncryptPassword(password, hash, hashSize, secret, sizeof(UCHAR) * ARRAYSIZE(secret));
+	status = EncryptPassword(password, &hash, &hashSize, secret, sizeof(UCHAR) * ARRAYSIZE(secret));
 	if (status == 0)
 	{
-		std::cout << "Hash: ";
+		printf_s("Hash: ");
 		for (int i = 0; i < hashSize; i++)
 		{
-			std::cout << std::hex << (int)hash[i];
+			printf_s("%02x", hash[i]);
 		}
-		std::cout << std::endl;
+		printf_s("\n");
 	}
 	status = ValidatePassword(password, hash, hashSize, secret, sizeof(UCHAR) * ARRAYSIZE(secret));
 
-	delete[] hash;
+	free(hash);
 	return status;
 }
